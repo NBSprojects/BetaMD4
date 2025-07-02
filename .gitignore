@@ -22,3 +22,10 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
+# Environnement virtuel Python
+venv/
+/venv/
+
+# Fichiers et dossiers générés
+trained_models/

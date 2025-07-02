@@ -97,16 +97,38 @@ def get_config() -> config_dict.ConfigDict:
 
   config.trial = 0  # Dummy for repeated runs.
   config.test_in_colab = False
+
+  # training
+  config.train.optimizer = 'adam'
+  config.train.learning_rate = 2e-4
+  config.train.warmup_steps = 5000
+  config.train.weight_decay = 0.0
+  config.train.ema_decay = 0.9999
+  config.train.batch_size = 128
+  config.train.num_steps = 700001
+
+  # model
+  config.model = ml_collections.config_dict.ConfigDict()
+  config.model.model_name = 'entropy_md4'
+  config.model.noise_schedule = 'linear'
+  config.model.timesteps = 1000
+  config.model.cont_time = True
+  config.model.depth_scaled_init = False
+  config.model.cond_type = 'adaln_zero'
+  config.model.classes = 0
+
+  # --- New parameters for EntropyMD4 ---
+  config.model.entropy_k = 4
+  config.model.m1_weights_path = 'trained_models/md4_text8_step_70000.msgpack'
+  config.model.m2_weights_path = 'trained_models/jax_model_weights.msgpack'
+
+  # --- M2 Model (JaxBetaParamMLP) Configuration ---
+  config.model.m2_config = ml_collections.config_dict.ConfigDict()
+  config.model.m2_config.model_name = 'beta_mlp'
+  config.model.m2_config.hidden_layers = [500, 500, 500]
+  config.model.m2_config.output_size = config.data_shape[0] * 2
+
   return config
 
 
-# By default, the launcher calls `sweep()`.
-# To disable the sweep, the `sweep()` function can be commented (or renamed),
-# or the flag `--nosweep` can be specified to the launcher.
-def sweep(add: abc.Callable[..., None]):
-  """Starts multiple work units with varying config args."""
-  add(
-      learning_rate=5e-4,
-      dropout_rate=0.05,
-      weight_decay=0.03,
-  )
+# By default, the launcher calls `
