@@ -21,24 +21,13 @@ import jax.numpy as jnp
 import logging
 from pathlib import Path as epath
 from flax import serialization
+import flax.linen as nn
+import flax.core
 
 from md4.models.diffusion import genmd4
 from md4.models.diffusion import md4
 from md4.models.diffusion import entropy_md4
-from md4.models import mlp
 from md4.models.networks import mlp as mlp_network
-from md4.models.networks import unet
-
-# Dictionary of all available models.
-_MODELS = {
-    "default": discrete_diffusion.DiscreteDiffusion,
-    "absorbing": absorbing_diffusion.AbsorbingDiffusion,
-    "score": score_based.ScoreBased,
-    "unet": unet.UNet,
-    "mlp": mlp_network.MLP,
-    "beta_mlp": mlp_network.JaxBetaParamMLP,
-    "entropy_md4": entropy_md4.EntropyMD4,
-}
 
 
 def get_model(config: ml_collections.ConfigDict):
@@ -117,21 +106,54 @@ def get_model(config: ml_collections.ConfigDict):
         entropy_k=config.entropy_k,
         t1=config.t1,
         antithetic_time_sampling=config.antithetic_time_sampling,
+        config=config,
     )
-  elif config.model_type == "mlp":
-    return mlp_network.MLP(features=config.features)
+  elif config.model_type == "beta_mlp":
+    return mlp_network.JaxBetaParamMLP(
+        output_size=config.output_size, hidden_layers=config.features
+    )
   else:
     raise NotImplementedError(f"No model found for {config.model_type}")
 
 
-def load_model_and_params(
+def load_m1_model(
+    config: ml_collections.ConfigDict,
+    weights_path: str,
+    input_shape: tuple[int, ...],
+) -> tuple[nn.Module, dict]:
+  """Loads the M1 model (MD4) which has raw params in its weight file."""
+  model = get_model(config)
+  rng = jax.random.PRNGKey(0)
+  dummy_input = jnp.ones((1,) + input_shape, dtype="int32")
+
+  # Initialize to get the variable structure.
+  variables = model.init(rng, dummy_input, train=False)
+  
+  params_struct = variables.pop('params')
+  # The rest is model state (e.g., batch_stats), though M1 might not have it.
+  model_state_struct = variables
+
+  if not epath(weights_path).exists():
+    raise FileNotFoundError(f"Model weights not found at: {weights_path}")
+
+  with epath(weights_path).open("rb") as f:
+    # Load raw bytes into the 'params' structure.
+    loaded_params = serialization.from_bytes(params_struct, f.read())
+
+  # Re-assemble the full dictionary.
+  final_variables = {'params': loaded_params, **model_state_struct}
+  
+  return model, flax.core.freeze(final_variables)
+
+
+def load_m2_model(
     config: ml_collections.ConfigDict,
     weights_path: str,
     input_shape: tuple[int, ...],
     is_text_model: bool = True,
     init_kwargs: dict | None = None,
 ) -> tuple[nn.Module, dict]:
-  """Loads a model and its variables (params and state) from a file."""
+  """Loads the M2 model (MLP) which has a full var dict in its weight file."""
   if init_kwargs is None:
     init_kwargs = {}
   logging.info("Loading model from config: %s", config)
@@ -145,14 +167,14 @@ def load_model_and_params(
   else:  # For models taking float inputs like the MLP
     dummy_input = jnp.ones((1,) + input_shape, dtype=jnp.float32)
 
-  # Initialize with train=False to get the correct variable structure
-  # including 'batch_stats' for BatchNorm.
+  # Initialize to get variable structure, M2 returns the dict directly.
   variables = model.init(rng, dummy_input, train=False, **init_kwargs)
 
-  if not epath.Path(weights_path).exists():
+  if not epath(weights_path).exists():
     raise FileNotFoundError(f"Model weights not found at: {weights_path}")
 
-  with epath.Path(weights_path).open("rb") as f:
+  with epath(weights_path).open("rb") as f:
+    # The file contains the full variable dictionary.
     loaded_variables = serialization.from_bytes(variables, f.read())
 
   return model, loaded_variables

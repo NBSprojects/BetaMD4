@@ -24,6 +24,9 @@ import tensorflow_probability.substrates.jax as tfp
 
 from md4 import utils
 from md4.models import backward
+from md4.models import utils as model_utils
+
+import ml_collections
 
 tfd = tfp.distributions
 tfm = tfp.math
@@ -36,6 +39,7 @@ class EntropyMD4(nn.Module):
   """
 
   # --- Configuration Attributes (from config file) ---
+  config: ml_collections.ConfigDict
   data_shape: tuple[int, ...]
   cont_time: bool
   timesteps: int
@@ -82,6 +86,23 @@ class EntropyMD4(nn.Module):
         outside_embed=self.outside_embed,
     )
 
+    # Load auxiliary models M1 and M2 using their dedicated loaders
+    print('Loading m1 model...')
+    self.m1_model, self.m1_variables = model_utils.load_m1_model(
+        config=self.config.m1_config,
+        weights_path=self.config.m1_weights_path,
+        input_shape=self.data_shape,
+    )
+    print('Successfully loaded m1 model')
+
+    print('Loading m2 model...')
+    self.m2_model, self.m2_variables = model_utils.load_m2_model(
+        config=self.config.m2_config,
+        weights_path=self.config.m2_weights_path,
+        input_shape=self.data_shape,
+    )
+    print('Successfully loaded m2 model')
+
   def get_cond_embedding(self, conditioning):
     if conditioning is not None and self.classes > 0:
       return self.cond_embeddings(conditioning)
@@ -103,10 +124,6 @@ class EntropyMD4(nn.Module):
   def _calculate_beta_params(
       self,
       x: jnp.ndarray,
-      m1_model: nn.Module,
-      m1_variables: dict,
-      m2_model: nn.Module,
-      m2_variables: dict,
       train: bool = False,
   ) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Calculates Beta distribution parameters (a, b) from token entropy."""
@@ -124,13 +141,13 @@ class EntropyMD4(nn.Module):
 
     t_for_m1 = jnp.array(self.t1)
 
-    logits, _ = m1_model.apply(
-        m1_variables,
+    logits, _ = self.m1_model.apply(
+        self.m1_variables,
         masked_batch,
         t=t_for_m1,
         cond=None,
         train=False,
-        method=m1_model.predict_x,
+        method=self.m1_model.predict_x,
     )
 
     n_indep_axes = logits.ndim - 2  # Pour le texte, shape est (B, L, V), donc ndim=3 -> n_indep_axes=1
@@ -144,7 +161,7 @@ class EntropyMD4(nn.Module):
     sum_entropy = jnp.sum(entropy_sequences, axis=-1, keepdims=True)
     normalized_entropies = entropy_sequences / (sum_entropy + 1e-6)
 
-    a, b = m2_model.apply(m2_variables, normalized_entropies, train=train)
+    a, b = self.m2_model.apply(self.m2_variables, normalized_entropies, train=train)
 
     return a, b
 
@@ -164,13 +181,9 @@ class EntropyMD4(nn.Module):
       x: jnp.ndarray,
       cond: jnp.ndarray | None = None,
       train: bool = False,
-      m1_model: nn.Module | None = None,
-      m1_variables: dict | None = None,
-      m2_model: nn.Module | None = None,
-      m2_variables: dict | None = None,
   ):
     """The main forward pass of the model."""
-    if m1_model is None or m1_variables is None or m2_model is None or m2_variables is None:
+    if self.m1_model is None or self.m1_variables is None or self.m2_model is None or self.m2_variables is None:
       dummy_zt = jnp.zeros_like(x)
       dummy_t = jnp.ones(x.shape[0])
       self.predict_x(
@@ -191,9 +204,7 @@ class EntropyMD4(nn.Module):
     cond_embedding = self.get_cond_embedding(cond)
 
     a, b = jax.lax.stop_gradient(
-        self._calculate_beta_params(
-            x, m1_model, m1_variables, m2_model, m2_variables, train=train
-        )
+        self._calculate_beta_params(x, train=train)
     )
 
     if self.antithetic_time_sampling:

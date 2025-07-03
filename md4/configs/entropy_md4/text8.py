@@ -62,22 +62,65 @@ def get_config() -> config_dict.ConfigDict:
   # --- Auxiliary Model M1 Config (Fixed Pre-trained Diffusion Model) ---
   # --- UPDATED based on inference.py ---
   config.m1_config = config_dict.ConfigDict()
-  config.m1_config.model_type = "md4"
-  config.m1_config.data_shape = config.data_shape
-  config.m1_config.vocab_size = config.vocab_size
-  config.m1_config.classes = config.classes
+
+  # Dataset
+  config.m1_config.dataset = 'text8'
+  config.m1_config.data_shape = (256,)
+  config.m1_config.vocab_size = 27
+  config.m1_config.classes = -1
+
+  # Model
+  config.m1_config.task_type = 'text'
+  config.m1_config.model_type = 'md4'
+  config.m1_config.timesteps = 1000
+  config.m1_config.noise_schedule = 'linear'
+  config.m1_config.outside_embed = True
+  config.m1_config.time_features = 't'
+  config.m1_config.cont_time = True
+
+  # --- Paramètres ajustés pour < 25M de paramètres ---
   config.m1_config.feature_dim = 64
   config.m1_config.n_layers = 8
   config.m1_config.num_heads = 6
-  config.m1_config.outside_embed = True
-  config.m1_config.noise_schedule = 'linear'
-  config.m1_config.time_features = 't'
-  config.m1_config.cont_time = True
-  config.m1_config.cond_type = 'adaln_zero'
+  # -----------------------------------------------------
+
   config.m1_config.mlp_type = 'glu'
+  config.m1_config.depth_scaled_init = True
+  config.m1_config.cond_type = 'adaln_zero'
+  config.m1_config.n_dit_layers = 0
+  config.m1_config.dit_num_heads = 12
+  config.m1_config.dit_hidden_size = 768
+  config.m1_config.ch_mult = (1,)
+  config.m1_config.dropout_rate = 0
+
+  # Training
+  config.m1_config.learning_rate = 3e-4
+  config.m1_config.learning_rate_schedule = 'cosine'
+  config.m1_config.warmup_steps = 2000
+  config.m1_config.weight_decay = 0.03
+  config.m1_config.clip = 1.0
+  config.m1_config.b2 = 0.999
+  config.m1_config.num_epochs = 1
+  config.m1_config.ema_rate = 0.9999
+  config.m1_config.num_train_steps = 50_000
+  config.m1_config.batch_size = 256
+  config.m1_config.num_microbatches = 2
+  config.m1_config.check_nans = False
+
+  # Logging & Checkpointing
+  config.m1_config.log_loss_every_steps = 100
+  config.m1_config.eval_every_steps = 2500
+  config.m1_config.checkpoint_every_steps = 10000
+  config.m1_config.checkpoint_keep_period = 5000
+
+  # Sampling
   config.m1_config.sampler = 'ancestral'
   config.m1_config.sampling_grid = 'cosine'
-  config.m1_config.timesteps = 1000
+  config.m1_config.topp = 0.98
+
+  # Misc
+  config.m1_config.seed = 42
+  config.m1_config.grain_num_workers = 8
   # --- Path to the pre-trained weights for M1 ---
   config.m1_weights_path = "trained_models/md4_text8_step_70000.msgpack"
 
@@ -87,9 +130,9 @@ def get_config() -> config_dict.ConfigDict:
   config.m2_config.model_type = "beta_mlp" 
   # Example MLP architecture
   config.m2_config.features = [500, 500, 500] 
-  config.model.m2_config.output_size = config.data.data_shape[0] * 2
+  config.m2_config.output_size = config.data_shape[0] * 2
   # --- Path to the pre-trained weights for M2 ---
-  config.m2_weights_path = "trained_models/dummy_entropy_mlp.msgpack"
+  config.m2_weights_path = "trained_models/jax_model_weights.msgpack"
 
 
   # --- Training Configs ---

@@ -31,6 +31,8 @@ import tensorflow_datasets as tfds
 import transformers
 
 
+DATA_DIR = os.environ.get("DATA_DIR", "./data_dir")
+
 # pylint: disable=g-import-not-at-top
 try:
   import cv2

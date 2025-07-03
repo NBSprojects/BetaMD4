@@ -3,7 +3,17 @@ import jax.numpy as jnp
 
 
 class MLP(nn.Module):
-    x = nn.Dense(features=self.output_dim)(x)
+  """The actual sequential network that mimics the PyTorch structure."""
+  output_size: int
+  hidden_layers: list
+
+  @nn.compact
+  def __call__(self, x: jnp.ndarray, train: bool = True) -> jnp.ndarray:
+    for i, hidden_size in enumerate(self.hidden_layers):
+      x = nn.Dense(features=hidden_size, name=f"dense_{i}")(x)
+      x = nn.BatchNorm(use_running_average=not train, name=f"bn_{i}")(x)
+      x = nn.relu(x)
+    x = nn.Dense(features=self.output_size, name="dense_out")(x)
     return x
 
 

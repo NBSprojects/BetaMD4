@@ -29,3 +29,6 @@ venv/
 
 # Fichiers et dossiers générés
 trained_models/
+data_dir/
+expt_entropy/
+*.ipynb
