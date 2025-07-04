@@ -45,6 +45,13 @@ from md4 import utils
 from md4.models import utils as model_utils
 
 
+def shard(pytree):
+  """Shard the pytree across devices."""
+  return jax.tree.map(
+      lambda x: x.reshape((jax.local_device_count(), -1) + x.shape[1:]), pytree
+  )
+
+
 @flax.struct.dataclass
 class TrainState:
   """State of the model and the training.
@@ -402,29 +409,51 @@ def evaluate(
     train_state: TrainState,
     eval_loader: grain.DataLoader,
     num_eval_steps: int = -1,
+    tokenizer: Any | None = None,
 ):
-  """Evaluate the model on the given dataset."""
+  """Runs evaluation."""
   logging.info("Starting evaluation.")
   eval_metrics = None
-  with utils.StepTraceContextHelper("eval", 0) as trace_context:
-    # Use `iter` to reset the eval_loader before each evaluation.
-    for step, batch in enumerate(iter(eval_loader)):
-      rng, sub_rng = jax.random.split(rng)
-      sub_rng = flax_utils.replicate(sub_rng)
-      batch = utils.reshape_batch(batch)
-      metrics_update = flax_utils.unreplicate(
-          p_eval_step(rng=sub_rng, train_state=train_state, batch=batch)
-      )
-      eval_metrics = (
-          metrics_update
-          if eval_metrics is None
-          else eval_metrics.merge(metrics_update)
-      )
-      if num_eval_steps > 0 and step + 1 == num_eval_steps:
+  if jax.process_index() == 0:
+    pbar = range(num_eval_steps)
+    eval_iter = iter(eval_loader)
+    rngs = jax.random.split(rng, jax.local_device_count())
+    has_printed_this_eval = False
+    for i in pbar:
+      try:
+        batch = next(eval_iter)
+      except StopIteration:
+        logging.warning("Eval loader finished before num_eval_steps were taken.")
         break
-      trace_context.next_step()
-  if eval_metrics is None:
-    raise ValueError(f"Eval dataset {eval_loader} was empty.")
+
+      if i == 0 and tokenizer and not has_printed_this_eval:
+        logging.info("Decoding and printing first evaluation batch...")
+        token_ids_on_host = np.array(batch["text"])
+        for s_idx, single_sequence_ids in enumerate(token_ids_on_host[:5]):
+          chars = []
+          for token_id in single_sequence_ids:
+            if token_id == 26:  # pad token
+              chars.append(" ")
+            elif 0 <= token_id <= 25:  # a-z
+              chars.append(chr(token_id + 97))
+          sentence = "".join(chars)
+          logging.info(f"  Eval Sample {s_idx}: {sentence.strip()}")
+        has_printed_this_eval = True
+
+      batch = shard(batch)
+      metrics_update = flax_utils.unreplicate(
+          p_eval_step(
+              rng=rngs,
+              train_state=train_state,
+              batch=batch,
+          )
+      )
+      if eval_metrics is None:
+        eval_metrics = metrics_update
+      else:
+        eval_metrics = eval_metrics.merge(metrics_update)
+
+  logging.info("Finishing evaluation.")
   return eval_metrics
 
 
@@ -475,6 +504,10 @@ def train_and_evaluate(
   )
   train_loader, eval_loaders, dataset_info = create_datasets(config, data_seed)
   train_iter = iter(train_loader)
+
+  # Create a tokenizer instance for decoding, only if it's text8
+  tokenizer = None
+  tokenizer = input_pipeline.Text8Tokenizer()
 
   # Initialize model.
   rng, model_rng = jax.random.split(rng)
@@ -583,6 +616,7 @@ def train_and_evaluate(
                 train_state,
                 eval_loader,
                 config.num_eval_steps,
+                tokenizer=tokenizer,
             )
           eval_metrics_cpu = jax.tree_util.tree_map(
               np.array, eval_metrics.compute()

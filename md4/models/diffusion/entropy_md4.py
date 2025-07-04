@@ -125,17 +125,37 @@ class EntropyMD4(nn.Module):
       self,
       x: jnp.ndarray,
       train: bool = False,
+      contiguous: bool = True,
   ) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Calculates Beta distribution parameters (a, b) from token entropy."""
+
+    print('x.shape : ', x.shape)
+
     b, l = x.shape
-    m = l // self.entropy_k
+    m = self.entropy_k
 
     x_repeated = jnp.repeat(x, m, axis=0)
 
-    indices = jnp.arange(l)
-    i_mod_m = jnp.arange(m)
-    mask_template = (indices % m)[:, None] == i_mod_m
-    full_mask = jnp.tile(mask_template.T, (b, 1))
+    if contiguous:
+      # Mask contiguous chunks of tokens.
+      # For the i-th augmented sequence, mask the i-th chunk of tokens.
+      chunk_size = l // m
+      indices = jnp.arange(l)
+      i_chunk = jnp.arange(m)
+
+      start_indices = i_chunk * chunk_size
+      end_indices = start_indices + chunk_size
+
+      mask_template = (indices[None, :] >= start_indices[:, None]) & (
+          indices[None, :] < end_indices[:, None]
+      )
+      full_mask = jnp.tile(mask_template, (b, 1))
+    else:
+      # Mask tokens based on position modulo m (interleaved).
+      indices = jnp.arange(l)
+      i_mod_m = jnp.arange(m)
+      mask_template = (indices % m)[:, None] == i_mod_m
+      full_mask = jnp.tile(mask_template.T, (b, 1))
 
     masked_batch = jnp.where(full_mask, self.vocab_size, x_repeated)
 
@@ -150,18 +170,21 @@ class EntropyMD4(nn.Module):
         method=self.m1_model.predict_x,
     )
 
-    n_indep_axes = logits.ndim - 2  # Pour le texte, shape est (B, L, V), donc ndim=3 -> n_indep_axes=1
-    dist_m1 = tfd.Independent(tfd.Categorical(logits=logits), n_indep_axes)
+    dist_m1 = tfd.Categorical(logits=logits)
 
     token_entropies = dist_m1.entropy()
+
     entropy_values = jnp.where(full_mask, token_entropies, 0.0)
 
     entropy_sequences = jnp.sum(entropy_values.reshape(b, m, l), axis=1)
 
+    print('entropy_sequences.shape : ', entropy_sequences.shape)
+    print('entropy_sequences : ', entropy_sequences)
+
     sum_entropy = jnp.sum(entropy_sequences, axis=-1, keepdims=True)
     normalized_entropies = entropy_sequences / (sum_entropy + 1e-6)
 
-    a, b = self.m2_model.apply(self.m2_variables, normalized_entropies, train=train)
+    a, b = self.m2_model.apply(self.m2_variables, normalized_entropies, train=False)
 
     return a, b
 

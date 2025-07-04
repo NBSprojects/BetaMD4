@@ -35,7 +35,7 @@ def get_config() -> config_dict.ConfigDict:
   config.data_shape = (256,)
 
   # --- EntropyMD4 Specific Configs ---
-  config.entropy_k = 16  # Sub-sampling factor for entropy calculation
+  config.entropy_k = 16  # Sub-sampling factor for entropy calculation -> correspond au multiplicateur de la taille du batch
 
   # Diffusion model parameters
   config.timesteps = 1000
@@ -45,8 +45,8 @@ def get_config() -> config_dict.ConfigDict:
   
   # Main model architecture (the denoiser)
   config.feature_dim = 64
-  config.n_layers = 12
-  config.num_heads = 12
+  config.n_layers = 10
+  config.num_heads = 6
   config.mlp_type = "glu"
   config.depth_scaled_init = True
   config.cond_type = "adaln_zero"
@@ -144,15 +144,15 @@ def get_config() -> config_dict.ConfigDict:
   config.b2 = 0.999
   config.num_epochs = -1
   config.ema_rate = 0.9999
-  config.num_train_steps = 1_000_000
+  config.num_train_steps = 10_000
   config.num_eval_steps = -1
-  config.batch_size = 64
+  config.batch_size = 4
   config.num_microbatches = 1
   config.per_device_batch_size = -1
   config.eval_pad_last_batch = False
   config.check_nans = False
 
-  config.log_loss_every_steps = 500
+  config.log_loss_every_steps = 100
   config.eval_every_steps = 5000
   config.checkpoint_every_steps = 5000
   config.checkpoint_keep_period = 10000
